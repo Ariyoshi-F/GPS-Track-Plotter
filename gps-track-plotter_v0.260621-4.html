@@ -1,0 +1,923 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TRACK PLOTTER — GPSログ軌跡ビューア</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  :root{
+    --bg: #0a1620;
+    --panel: #0f2233;
+    --panel-2: #0c1c2b;
+    --grid: #173248;
+    --hairline: #1d3a52;
+    --accent: #ff8a3d;
+    --accent2: #4fd1c5;
+    --accent2-dim: #2b6b65;
+    --text: #edf1f4;
+    --text-dim: #82959f;
+    --text-faint: #4c6071;
+    --danger: #ff6b6b;
+    --danger-dim: #6b2c2c;
+    --display: 'Space Grotesk', sans-serif;
+    --mono: 'JetBrains Mono', monospace;
+  }
+  *{box-sizing:border-box;}
+  html,body{margin:0;padding:0;height:100%;background:var(--bg);color:var(--text);font-family:var(--display);}
+  body{
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 28px 28px;
+    background-attachment: fixed;
+    background-color: var(--bg);
+  }
+
+  .app{display:flex;flex-direction:column;height:100vh;overflow:hidden;}
+
+  header{
+    display:flex;align-items:baseline;gap:14px;
+    padding:14px 22px 12px;
+    border-bottom:1px solid var(--hairline);
+    background:linear-gradient(180deg, rgba(15,34,51,0.9), rgba(15,34,51,0.4));
+    flex-shrink:0;
+  }
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;color:var(--accent2);text-transform:uppercase;}
+  header h1{font-size:18px;margin:0;font-weight:600;letter-spacing:.02em;}
+  header .file-meta{margin-left:auto;font-family:var(--mono);font-size:11.5px;color:var(--text-dim);text-align:right;white-space:nowrap;}
+
+  .global-error{
+    display:none;background:rgba(255,107,107,0.1);border-bottom:1px solid var(--danger);
+    color:#ffd3d3;font-family:var(--mono);font-size:11.5px;padding:8px 22px;flex-shrink:0;
+  }
+
+  .main{display:flex;flex:1;min-height:0;}
+  .map-panel{flex:1;position:relative;min-width:0;}
+  #map{position:absolute;inset:0;background:#0c1c2b;}
+  .leaflet-container{background:#0c1c2b;font-family:var(--mono);}
+
+  .control-deck{
+    width:340px;flex-shrink:0;background:var(--panel);border-left:1px solid var(--hairline);
+    display:flex;flex-direction:column;overflow-y:auto;
+  }
+  @media (max-width: 880px){
+    .main{flex-direction:column;}
+    .control-deck{width:100%;border-left:none;border-top:1px solid var(--hairline);max-height:62vh;}
+    .map-panel{flex:1 1 38vh;}
+  }
+
+  .deck-section{padding:16px 18px;border-bottom:1px solid var(--hairline);}
+  .deck-section h2{font-family:var(--mono);font-size:10.5px;letter-spacing:.14em;text-transform:uppercase;color:var(--text-faint);margin:0 0 12px;}
+
+  .readout-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .readout-cell{background:var(--panel-2);border:1px solid var(--hairline);border-radius:6px;padding:8px 10px;min-height:54px;display:flex;flex-direction:column;justify-content:center;gap:3px;}
+  .readout-cell.wide{grid-column:1 / -1;}
+  .readout-label{font-family:var(--mono);font-size:9.5px;letter-spacing:.1em;color:var(--text-faint);text-transform:uppercase;}
+  .readout-value{font-family:var(--mono);font-size:15px;color:var(--accent2);font-weight:600;letter-spacing:.01em;text-shadow:0 0 10px rgba(79,209,197,0.35);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+  .readout-value.amber{color:var(--accent);text-shadow:0 0 10px rgba(255,138,61,0.35);}
+  .readout-sub{font-family:var(--mono);font-size:10px;color:var(--text-dim);}
+
+  .transport{display:flex;align-items:center;gap:10px;margin-bottom:12px;}
+  .btn-circle{width:42px;height:42px;border-radius:50%;border:1px solid var(--hairline);background:var(--panel-2);color:var(--text);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s, border-color .15s, transform .1s;}
+  .btn-circle:hover{border-color:var(--accent2);background:#102a3a;}
+  .btn-circle:active{transform:scale(0.94);}
+  .btn-circle svg{width:16px;height:16px;}
+  #playBtn{width:48px;height:48px;background:var(--accent2-dim);border-color:var(--accent2);}
+  #playBtn:hover{background:#22716a;}
+  #playBtn svg{width:18px;height:18px;}
+
+  select#speedSelect{font-family:var(--mono);font-size:12px;background:var(--panel-2);color:var(--text);border:1px solid var(--hairline);border-radius:6px;padding:8px 6px;cursor:pointer;outline:none;flex:1;}
+  select#speedSelect:hover{border-color:var(--accent2);}
+
+  input[type=range]{-webkit-appearance:none;width:100%;height:4px;border-radius:2px;background:var(--hairline);outline:none;margin-top:4px;}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--accent2);box-shadow:0 0 8px rgba(79,209,197,0.6);cursor:pointer;margin-top:-5px;}
+  input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--accent2);border:none;box-shadow:0 0 8px rgba(79,209,197,0.6);cursor:pointer;}
+  .scrub-labels{display:flex;justify-content:space-between;font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-top:5px;}
+
+  canvas#sparkline{width:100%;height:64px;display:block;border-radius:6px;background:var(--panel-2);border:1px solid var(--hairline);}
+
+  .opt-row{display:flex;align-items:center;justify-content:space-between;font-size:12.5px;color:var(--text-dim);padding:6px 0;}
+  .switch{position:relative;width:36px;height:20px;flex-shrink:0;}
+  .switch.small{width:30px;height:17px;}
+  .switch input{opacity:0;width:0;height:0;}
+  .slider-pill{position:absolute;inset:0;background:var(--hairline);border-radius:20px;cursor:pointer;transition:.2s;}
+  .slider-pill:before{content:"";position:absolute;width:14px;height:14px;left:3px;top:3px;background:#cfd8de;border-radius:50%;transition:.2s;}
+  .switch.small .slider-pill:before{width:11px;height:11px;}
+  .switch input:checked + .slider-pill{background:var(--accent2-dim);}
+  .switch input:checked + .slider-pill:before{transform:translateX(16px);background:var(--accent2);}
+  .switch.small input:checked + .slider-pill:before{transform:translateX(13px);}
+
+  .file-btn{width:100%;font-family:var(--mono);font-size:11.5px;letter-spacing:.05em;background:var(--panel-2);color:var(--text-dim);border:1px dashed var(--hairline);border-radius:6px;padding:10px;cursor:pointer;text-align:center;transition:.15s;text-transform:uppercase;}
+  .file-btn:hover{border-color:var(--accent2);color:var(--text);}
+  .file-btn.danger{border-style:solid;border-color:var(--danger-dim);color:#ffb3b3;}
+  .file-btn.danger:hover{border-color:var(--danger);background:rgba(255,107,107,0.08);}
+  .file-row{display:flex;gap:8px;margin-bottom:8px;}
+  .file-row .file-btn{flex:1;}
+
+  /* track list */
+  #trackList{display:flex;flex-direction:column;gap:8px;margin-bottom:10px;max-height:280px;overflow-y:auto;}
+  .track-card{background:var(--panel-2);border:1px solid var(--hairline);border-radius:6px;padding:9px 10px;}
+  .track-card-head{display:flex;align-items:center;gap:8px;margin-bottom:7px;}
+  .swatch{width:10px;height:10px;border-radius:50%;flex-shrink:0;}
+  .track-name{font-size:12px;color:var(--text);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .mini-x{background:none;border:none;color:var(--text-faint);font-size:15px;cursor:pointer;line-height:1;padding:0 2px;flex-shrink:0;}
+  .mini-x:hover{color:var(--danger);}
+  .track-card-body{display:grid;grid-template-columns:1fr 1fr;gap:4px 10px;}
+  .tc-row{display:flex;justify-content:space-between;gap:6px;font-family:var(--mono);font-size:10.5px;}
+  .tc-label{color:var(--text-faint);}
+  .tc-val{color:var(--text-dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .tc-val.status-active{color:var(--accent2);}
+  .tc-val.status-pending{color:var(--text-faint);}
+  .tc-val.status-done{color:var(--accent);}
+
+  /* ---------- upload overlay ---------- */
+  .upload-overlay{position:absolute;inset:0;z-index:500;display:flex;align-items:center;justify-content:center;background:radial-gradient(ellipse at 50% 40%, rgba(15,34,51,0.96), rgba(10,22,32,0.98));}
+  .upload-card{width:min(440px, 86vw);padding:34px 30px;border:1px solid var(--hairline);border-radius:10px;background:var(--panel);text-align:center;}
+  .upload-card .eyebrow{display:block;margin-bottom:6px;}
+  .upload-card h2{font-size:20px;margin:0 0 8px;font-weight:600;}
+  .upload-card p{font-size:12.5px;color:var(--text-dim);line-height:1.6;margin:0 0 22px;}
+  .dropzone{border:1.5px dashed var(--hairline);border-radius:8px;padding:26px 14px;cursor:pointer;transition:.15s;margin-bottom:14px;}
+  .dropzone.dragover{border-color:var(--accent2);background:rgba(79,209,197,0.06);}
+  .dropzone svg{width:26px;height:26px;color:var(--text-faint);margin-bottom:8px;}
+  .dropzone p{margin:0;font-size:12.5px;color:var(--text-dim);}
+  .dropzone .small{font-size:10.5px;color:var(--text-faint);margin-top:4px;}
+  .or-divider{display:flex;align-items:center;gap:10px;margin:14px 0;}
+  .or-divider span{font-family:var(--mono);font-size:10px;color:var(--text-faint);}
+  .or-divider:before,.or-divider:after{content:"";flex:1;height:1px;background:var(--hairline);}
+  .sample-btn{width:100%;font-family:var(--mono);font-size:12px;letter-spacing:.06em;text-transform:uppercase;background:var(--accent2-dim);color:#dffaf6;border:1px solid var(--accent2);border-radius:6px;padding:11px;cursor:pointer;transition:.15s;}
+  .sample-btn:hover{background:#1f6a63;}
+  .upload-error{margin-top:12px;font-family:var(--mono);font-size:11px;color:var(--danger);display:none;}
+
+  .gps-marker{position:relative;width:18px;height:18px;}
+  .gps-marker .dot{position:absolute;top:50%;left:50%;width:10px;height:10px;margin:-5px;border-radius:50%;}
+  .gps-marker .ring{position:absolute;top:50%;left:50%;width:18px;height:18px;margin:-9px;border-radius:50%;border:2px solid;opacity:.7;animation:pulse 1.8s ease-out infinite;}
+  @keyframes pulse{0%{transform:scale(0.4);opacity:.8;}100%{transform:scale(2.2);opacity:0;}}
+
+  .recenter-btn{
+    position:absolute;z-index:480;bottom:28px;right:12px;
+    width:40px;height:40px;border-radius:50%;
+    background:var(--panel-2);border:1px solid var(--hairline);color:var(--text-dim);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    box-shadow:0 2px 8px rgba(0,0,0,0.35);transition:.15s;
+  }
+  .recenter-btn:hover{border-color:var(--accent2);color:var(--text);}
+  .recenter-btn svg{width:18px;height:18px;}
+  .recenter-btn.active{background:var(--accent2-dim);border-color:var(--accent2);color:#dffaf6;}
+
+  .leaflet-control-attribution{background:rgba(10,22,32,0.7)!important;color:var(--text-faint)!important;}
+  .leaflet-control-attribution a{color:var(--text-dim)!important;}
+  @media (prefers-reduced-motion: reduce){.gps-marker .ring{animation:none;}}
+  ::-webkit-scrollbar{width:8px;}
+  ::-webkit-scrollbar-track{background:var(--panel-2);}
+  ::-webkit-scrollbar-thumb{background:var(--hairline);border-radius:4px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div>
+      <span class="eyebrow">GPS LOG VIEWER</span><br>
+      <h1>TRACK PLOTTER</h1>
+    </div>
+    <div class="file-meta" id="fileMeta">ログ未読込</div>
+  </header>
+  <div class="global-error" id="globalError"></div>
+
+  <div class="main">
+    <div class="map-panel">
+      <div id="map"></div>
+      <button class="recenter-btn" id="recenterBtn" title="現在位置への自動追従を再開">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M12 2v4M12 18v4M2 12h4M18 12h4" stroke-linecap="round"/>
+        </svg>
+      </button>
+
+      <div class="upload-overlay" id="uploadOverlay">
+        <div class="upload-card">
+          <span class="eyebrow">STEP 1 / READY TO PLOT</span>
+          <h2>GPSログを読み込む</h2>
+          <p>CSV形式のGPSログ(緯度・経度・時刻の列を含むもの)をドラッグ&ドロップ、またはサンプルデータで動作確認できます。複数ファイルを同時に選択すると、まとめて読み込んで比較表示できます。</p>
+          <div class="dropzone" id="dropzone">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 16V4M12 4l-4 4M12 4l4 4" stroke-linecap="round" stroke-linejoin="round"/><path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            <p>CSVファイルをドロップ、またはクリックして選択(複数可)</p>
+            <p class="small">対応列: lat/lon(+N/S, E/W)、date/time、speed、elevationなど</p>
+          </div>
+          <div class="or-divider"><span>OR</span></div>
+          <button class="sample-btn" id="sampleBtn">サンプルデータで試す(大阪城周遊ログ)</button>
+          <div class="upload-error" id="uploadError"></div>
+        </div>
+      </div>
+    </div>
+
+    <aside class="control-deck">
+      <div class="deck-section">
+        <h2>タイムライン</h2>
+        <div class="readout-grid">
+          <div class="readout-cell wide">
+            <span class="readout-label">Timestamp</span>
+            <span class="readout-value" id="rTime">—</span>
+            <span class="readout-sub" id="rElapsed">経過 —</span>
+          </div>
+          <div class="readout-cell">
+            <span class="readout-label">総移動距離</span>
+            <span class="readout-value amber" id="rTotalDist">—</span>
+          </div>
+          <div class="readout-cell">
+            <span class="readout-label">表示中ログ</span>
+            <span class="readout-value amber" id="rTrackCount">0 / 0</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="deck-section">
+        <h2>再生 / Playback</h2>
+        <div class="transport">
+          <button class="btn-circle" id="restartBtn" title="先頭へ">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zM20 6L10 12l10 6z"/></svg>
+          </button>
+          <button class="btn-circle" id="playBtn" title="再生/一時停止">
+            <svg id="playIcon" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button class="btn-circle" id="endBtn" title="末尾へ">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M18 6h-2v12h2zM4 6l10 6L4 18z"/></svg>
+          </button>
+          <select id="speedSelect">
+            <option value="1" selected>x1</option>
+            <option value="30">x30</option>
+            <option value="60">x60</option>
+            <option value="300">x300</option>
+            <option value="900">x900</option>
+            <option value="1800">x1800</option>
+            <option value="3600">x3600</option>
+          </select>
+        </div>
+        <input type="range" id="scrubber" class="scrubber" min="0" max="100" value="0" step="1">
+        <div class="scrub-labels"><span id="scrubStart">00:00:00</span><span id="scrubEnd">00:00:00</span></div>
+      </div>
+
+      <div class="deck-section">
+        <h2>速度プロファイル</h2>
+        <canvas id="sparkline" width="600" height="64"></canvas>
+      </div>
+
+      <div class="deck-section">
+        <h2>ログ一覧</h2>
+        <div id="trackList"></div>
+        <div class="file-row">
+          <button class="file-btn" id="addLogBtn">ログを追加</button>
+          <button class="file-btn" id="fitBtn">全体表示</button>
+        </div>
+        <button class="file-btn danger" id="clearAllBtn">すべてクリア</button>
+      </div>
+
+      <div class="deck-section" style="border-bottom:none;">
+        <h2>表示設定</h2>
+        <div class="opt-row">
+          <span>地図を現在位置に追従</span>
+          <label class="switch"><input type="checkbox" id="followToggle" checked><span class="slider-pill"></span></label>
+        </div>
+        <div class="opt-row">
+          <span>軌跡全体を薄く表示</span>
+          <label class="switch"><input type="checkbox" id="fullTrackToggle" checked><span class="slider-pill"></span></label>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+
+<input type="file" id="fileInput" accept=".csv,text/csv" multiple hidden>
+
+<script>
+(function(){
+  "use strict";
+
+  const TRACK_COLORS = ["#4fd1c5","#ff8a3d","#c792ea","#82e878","#ffd166","#ff6b9d","#5dade2","#f4a261"];
+
+  /* ============ STATE ============ */
+  let tracks = [];
+  let trackIdSeq = 0, colorCursor = 0;
+  let globalStart = null, globalEnd = null, globalDurationMs = 1000;
+  let playing = false, speedMult = 1, virtualMs = 0, lastFrameTs = null, rafId = null;
+  let lastFollowKey = null; // 直前に追従していたログ集合のキー(②: 変化検知用)
+  let map, sampleSeed = 1;
+
+  const el = id => document.getElementById(id);
+  const fmtNum = (n, d=5) => (n===null||n===undefined||isNaN(n)) ? "—" : n.toFixed(d);
+  const pad2 = n => String(n).padStart(2,"0");
+  const escapeHtml = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+
+  function fmtClock(ms){
+    if (ms < 0) ms = 0;
+    const totalSec = Math.floor(ms/1000);
+    const h = Math.floor(totalSec/3600);
+    const m = Math.floor((totalSec%3600)/60);
+    const s = totalSec%60;
+    return `${pad2(h)}:${pad2(m)}:${pad2(s)}`;
+  }
+  function fmtDateTime(d){
+    if (!(d instanceof Date) || isNaN(d.getTime())) return "—";
+    const Y=d.getFullYear(), M=pad2(d.getMonth()+1), D=pad2(d.getDate());
+    const h=pad2(d.getHours()), m=pad2(d.getMinutes()), s=pad2(d.getSeconds());
+    return `${Y}-${M}-${D} ${h}:${m}:${s}`;
+  }
+  function fmtDist(meters){
+    if (meters===null||meters===undefined||isNaN(meters)) return "—";
+    if (meters >= 1000) return (meters/1000).toFixed(2) + " km";
+    return meters.toFixed(0) + " m";
+  }
+  function fmtSpeed(mps){
+    if (mps===null||mps===undefined||isNaN(mps)) return "—";
+    return (mps*3.6).toFixed(1) + " km/h";
+  }
+  function haversine(lat1, lon1, lat2, lon2){
+    const R = 6371000;
+    const toRad = d => d * Math.PI/180;
+    const dLat = toRad(lat2-lat1), dLon = toRad(lon2-lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  /* ============ CSV PARSING ============ */
+  const HEADER_ALIASES = {
+    lat: ["lat","latitude","緯度"],
+    lon: ["lon","lng","long","longitude","経度"],
+    ns: ["n/s","ns"],
+    ew: ["e/w","ew"],
+    datetime: ["timestamp","datetime","time_utc","日時"],
+    date: ["date","日付"],
+    timeofday: ["time","時刻","time_of_day"],
+    ele: ["ele","elevation","alt","altitude","height","高度"],
+    speed: ["speed","spd","velocity","speed_kmh","speed_mps","速度"]
+  };
+
+  function detectDelimiter(line){
+    const counts = { ",": (line.match(/,/g)||[]).length, ";": (line.match(/;/g)||[]).length, "\t": (line.match(/\t/g)||[]).length };
+    let best = ",", bestCount = -1;
+    for (const k in counts){ if (counts[k] > bestCount){ best = k; bestCount = counts[k]; } }
+    return bestCount > 0 ? best : ",";
+  }
+
+  function mapHeader(headerRow){
+    const map = {};
+    headerRow.forEach((raw, i) => {
+      const h = raw.trim().toLowerCase().replace(/^["']|["']$/g, "");
+      for (const key in HEADER_ALIASES){
+        if (HEADER_ALIASES[key].some(alias => h === alias || h.includes(alias))){
+          if (map[key] === undefined) map[key] = i;
+        }
+      }
+    });
+    return map;
+  }
+
+  function looksLikeHeader(row){
+    return row.some(cell => {
+      const c = cell.trim().toLowerCase();
+      return Object.values(HEADER_ALIASES).some(aliases => aliases.includes(c) || aliases.some(a=>c.includes(a)));
+    });
+  }
+
+  function parseTimeValue(raw, fallbackIndex, baseTime, intervalGuessSec){
+    if (raw === undefined || raw === null || raw === "") {
+      return new Date(baseTime.getTime() + fallbackIndex * intervalGuessSec * 1000);
+    }
+    const s = String(raw).trim().replace(/^["']|["']$/g,"");
+    if (/^\d+(\.\d+)?$/.test(s)){
+      const num = parseFloat(s);
+      if (num > 1e12) return new Date(num);
+      if (num > 1e9) return new Date(num * 1000);
+      return new Date(baseTime.getTime() + num*1000);
+    }
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) return parsed;
+    return new Date(baseTime.getTime() + fallbackIndex * intervalGuessSec * 1000);
+  }
+
+  function applyTimeOfDay(dateBase, timeStr, prevDate){
+    const m = String(timeStr).trim().match(/^(\d{1,2}):(\d{2})(:(\d{2}(\.\d+)?))?$/);
+    if (!m) return null;
+    const d = new Date(dateBase);
+    d.setHours(parseInt(m[1],10), parseInt(m[2],10), Math.floor(parseFloat(m[4]||"0")), 0);
+    if (prevDate && d.getTime() < prevDate.getTime() - 60*1000){
+      d.setDate(d.getDate() + 1);
+    }
+    return d;
+  }
+
+  function resolveTimestamp(row, headerMap, index, baseTime, prevTime){
+    if (headerMap.datetime !== undefined && row[headerMap.datetime]){
+      return parseTimeValue(row[headerMap.datetime], index, baseTime, 5);
+    }
+    if (headerMap.date !== undefined && row[headerMap.date]){
+      const dateStr = String(row[headerMap.date]).trim().replace(/^["']|["']$/g,"");
+      const timeStr = headerMap.timeofday !== undefined ? row[headerMap.timeofday] : null;
+      let base = new Date(dateStr);
+      if (isNaN(base.getTime())) base = baseTime;
+      if (timeStr){
+        const combined = applyTimeOfDay(base, timeStr, null);
+        if (combined) return combined;
+      }
+      return base;
+    }
+    if (headerMap.timeofday !== undefined && row[headerMap.timeofday]){
+      const combined = applyTimeOfDay(prevTime || baseTime, row[headerMap.timeofday], prevTime);
+      if (combined) return combined;
+    }
+    return new Date(baseTime.getTime() + index * 5000);
+  }
+
+  function applyHemisphereSign(value, hemChar, positiveChar){
+    if (!hemChar) return value;
+    const c = String(hemChar).trim().toUpperCase().charAt(0);
+    if (!c) return value;
+    return c === positiveChar ? Math.abs(value) : -Math.abs(value);
+  }
+
+  function parseCSV(text){
+    const lines = text.split(/\r\n|\n|\r/).map(l=>l).filter(l => l.trim().length > 0);
+    if (lines.length < 2) throw new Error("有効なデータ行が見つかりません(2行以上必要です)。");
+
+    const delim = detectDelimiter(lines[0]);
+    const splitLine = l => l.split(delim).map(c => c.trim());
+
+    let headerMap = null;
+    let dataLines = lines;
+    const firstRow = splitLine(lines[0]);
+    if (looksLikeHeader(firstRow)){
+      headerMap = mapHeader(firstRow);
+      dataLines = lines.slice(1);
+    }
+    if (!headerMap || headerMap.lat === undefined || headerMap.lon === undefined){
+      headerMap = { lat:0, lon:1, datetime:2, ele:3, speed:4 };
+    }
+
+    const baseTime = new Date();
+    const rawRows = dataLines.map(splitLine).filter(r => r.length >= 2 && r[headerMap.lat] !== undefined);
+
+    let prevTime = null;
+    const result = rawRows.map((r, i) => {
+      let lat = parseFloat(r[headerMap.lat]);
+      let lon = parseFloat(r[headerMap.lon]);
+      if (headerMap.ns !== undefined) lat = applyHemisphereSign(lat, r[headerMap.ns], "N");
+      if (headerMap.ew !== undefined) lon = applyHemisphereSign(lon, r[headerMap.ew], "E");
+      const time = resolveTimestamp(r, headerMap, i, baseTime, prevTime);
+      prevTime = time;
+      const ele = headerMap.ele !== undefined && r[headerMap.ele] !== undefined && r[headerMap.ele] !== "" ? parseFloat(r[headerMap.ele]) : null;
+      const speedRaw = headerMap.speed !== undefined && r[headerMap.speed] !== undefined && r[headerMap.speed] !== "" ? parseFloat(r[headerMap.speed]) : null;
+      return { lat, lon, time, ele, speedRaw };
+    }).filter(p => !isNaN(p.lat) && !isNaN(p.lon) && Math.abs(p.lat) <= 90 && Math.abs(p.lon) <= 180);
+
+    if (result.length < 2) throw new Error("緯度・経度として解釈できる行が2件未満でした。列の並びをご確認ください。");
+
+    result.sort((a,b) => a.time - b.time);
+
+    const uniqueTimes = new Set(result.map(p => p.time.getTime())).size;
+    let timestampsWereSynthesized = false;
+    if (uniqueTimes < Math.max(2, result.length * 0.4)){
+      const synthStart = result[0].time.getTime();
+      result.forEach((p, i) => { p.time = new Date(synthStart + i * 1000); });
+      timestampsWereSynthesized = true;
+    }
+    result.timestampsWereSynthesized = timestampsWereSynthesized;
+    return result;
+  }
+
+  /* ============ SAMPLE DATA ============ */
+  function generateSampleCSV(){
+    const waypoints = [
+      [34.6873, 135.5262],[34.6881, 135.5271],[34.6887, 135.5280],[34.6890, 135.5290],
+      [34.6886, 135.5298],[34.6878, 135.5301],[34.6869, 135.5296],[34.6862, 135.5286],
+      [34.6863, 135.5274],[34.6868, 135.5265],[34.6873, 135.5262]
+    ];
+    const segPoints = 7, intervalSec = 12;
+    const start = new Date(); start.setHours(9,0,0,0);
+    const rows = [["latitude","longitude","timestamp","speed_kmh","elevation"]];
+    let t = 0, idx = 0, seed = (sampleSeed++ * 91 + 17) % 9973;
+    function noise(){ seed = (seed*9301+49297)%233280; return (seed/233280 - 0.5); }
+    for (let w=0; w<waypoints.length-1; w++){
+      const [lat1,lon1] = waypoints[w];
+      const [lat2,lon2] = waypoints[w+1];
+      for (let s=0; s<segPoints; s++){
+        const f = s/segPoints;
+        const lat = lat1 + (lat2-lat1)*f + noise()*0.00006;
+        const lon = lon1 + (lon2-lon1)*f + noise()*0.00006;
+        const time = new Date(start.getTime() + t*1000);
+        const speedKmh = (4.2 + Math.sin(idx*0.4)*1.1 + noise()*0.6).toFixed(2);
+        const elevation = (5 + Math.sin(idx*0.2)*2).toFixed(1);
+        rows.push([lat.toFixed(6), lon.toFixed(6), time.toISOString(), speedKmh, elevation]);
+        t += intervalSec; idx++;
+      }
+    }
+    return rows.map(r => r.join(",")).join("\n");
+  }
+
+  /* ============ TRACK METRICS ============ */
+  function buildTrackMetrics(raw){
+    const cum = [0]; const speeds = []; let totalDist = 0;
+    for (let i=1; i<raw.length; i++){
+      const d = haversine(raw[i-1].lat, raw[i-1].lon, raw[i].lat, raw[i].lon);
+      totalDist += d; cum.push(totalDist);
+      const dtSec = (raw[i].time - raw[i-1].time) / 1000;
+      let v;
+      if (raw[i].speedRaw !== null && !isNaN(raw[i].speedRaw)) v = raw[i].speedRaw/3.6;
+      else v = dtSec > 0 ? d/dtSec : 0;
+      speeds.push(Math.max(0,v));
+    }
+    speeds.unshift(speeds[0] || 0);
+    let durationMs = raw[raw.length-1].time - raw[0].time;
+    if (durationMs <= 0) durationMs = (raw.length-1) * 1000;
+    return { points: raw, cum, speeds, totalDist, durationMs };
+  }
+
+  /* ============ MAP ============ */
+  function initMap(){
+    map = L.map("map", { zoomControl:true, attributionControl:true }).setView([34.6873,135.5262], 14);
+    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(map);
+
+    // ユーザーがドラッグ/ズーム操作したら自動追従を一時解除する
+    // (panTo は dragstart/zoomstart を発生させないため、ここで発火するのはユーザー操作のみ)
+    // ドラッグ(パン)操作のみ自動追従を解除する。ズーム(スクロール/ピンチ/+-ボタン)は
+    // 「同じ場所を拡大縮小したいだけ」であることが多いため、追従を継続させる。
+    // ※ fitBounds 等の自プログラムによるズームは dragstart を発生させないため誤爆しない。
+    map.on("dragstart", () => {
+      if (el("followToggle").checked){
+        el("followToggle").checked = false;
+        lastFollowKey = null;
+        syncFollowUI();
+      }
+    });
+
+    // ズーム後、追従ONのままなら新しいズーム倍率でGPS位置に再センタリングする
+    // (一時停止中にズームしても追従が途切れないようにするため)
+    map.on("zoomend", () => {
+      if (el("followToggle").checked) updateAll(virtualMs);
+    });
+  }
+
+  function syncFollowUI(){
+    el("recenterBtn").classList.toggle("active", el("followToggle").checked);
+  }
+
+  // ② 追従対象の「集合」が変わった時だけ fitBounds でズームを再計算する。
+  //    集合が同じフレームでは panTo だけで中心を動かす(ズームは変えない=軽い)。
+  function applyFollowCamera(followSet){
+    if (!el("followToggle").checked || !followSet.length) return;
+    const key = followSet.map(p => p.id).sort((a,b)=>a-b).join(",");
+
+    if (followSet.length === 1){
+      map.panTo([followSet[0].lat, followSet[0].lon], { animate:true, duration:0.3 });
+    } else {
+      if (key !== lastFollowKey){
+        const bounds = L.latLngBounds(followSet.map(p => [p.lat, p.lon]));
+        map.fitBounds(bounds, { padding:[60,60], animate:true });
+      } else {
+        const avgLat = followSet.reduce((s,p)=>s+p.lat,0)/followSet.length;
+        const avgLon = followSet.reduce((s,p)=>s+p.lon,0)/followSet.length;
+        map.panTo([avgLat, avgLon], { animate:true, duration:0.3 });
+      }
+    }
+    lastFollowKey = key;
+  }
+
+  function fitAllBounds(){
+    const visible = tracks.filter(t=>t.visible);
+    const use = visible.length ? visible : tracks;
+    if (!use.length) return;
+    const allPts = use.flatMap(t => t.points.map(p=>[p.lat,p.lon]));
+    if (allPts.length) map.fitBounds(L.latLngBounds(allPts), { padding:[40,40] });
+  }
+
+  function toggleTrackLayers(track){
+    if (track.visible){
+      if (el("fullTrackToggle").checked) track.fullLine.addTo(map);
+      track.trailLine.addTo(map);
+      track.marker.addTo(map);
+    } else {
+      map.removeLayer(track.fullLine);
+      map.removeLayer(track.trailLine);
+      map.removeLayer(track.marker);
+    }
+  }
+
+  /* ============ TRACK LIST UI ============ */
+  function createTrackCardElement(track){
+    const card = document.createElement("div");
+    card.className = "track-card";
+    card.innerHTML = `
+      <div class="track-card-head">
+        <span class="swatch" style="background:${track.color}"></span>
+        <span class="track-name" title="${escapeHtml(track.label)}">${escapeHtml(track.label)}</span>
+        <label class="switch small"><input type="checkbox" class="vis-toggle" checked><span class="slider-pill"></span></label>
+        <button class="mini-x" title="削除">×</button>
+      </div>
+      <div class="track-card-body">
+        <div class="tc-row"><span class="tc-label">状態</span><span class="tc-val status">—</span></div>
+        <div class="tc-row"><span class="tc-label">速度</span><span class="tc-val speed">—</span></div>
+        <div class="tc-row"><span class="tc-label">座標</span><span class="tc-val coords">—</span></div>
+        <div class="tc-row"><span class="tc-label">距離</span><span class="tc-val dist">—</span></div>
+      </div>`;
+    card.querySelector(".vis-toggle").addEventListener("change", e => {
+      track.visible = e.target.checked;
+      toggleTrackLayers(track);
+      updateHeaderSummary();
+      updateAll(virtualMs);
+    });
+    card.querySelector(".mini-x").addEventListener("click", () => removeTrack(track.id));
+    track.cardEl = card;
+    el("trackList").appendChild(card);
+  }
+
+  function updateTrackCard(track, point, status){
+    if (!track.cardEl) return;
+    const statusEl = track.cardEl.querySelector(".status");
+    statusEl.textContent = status;
+    statusEl.className = "tc-val status " + (status === "進行中" ? "status-active" : status === "終了" ? "status-done" : "status-pending");
+    track.cardEl.querySelector(".coords").textContent = `${point.lat.toFixed(5)}, ${point.lon.toFixed(5)}`;
+    track.cardEl.querySelector(".speed").textContent = fmtSpeed(track.speeds[track.currentIdx]);
+    track.cardEl.querySelector(".dist").textContent = `${fmtDist(track.cum[track.currentIdx])} / ${fmtDist(track.totalDist)}`;
+  }
+
+  function removeTrack(id){
+    const idx = tracks.findIndex(t => t.id === id);
+    if (idx < 0) return;
+    const [t] = tracks.splice(idx, 1);
+    map.removeLayer(t.fullLine); map.removeLayer(t.trailLine); map.removeLayer(t.marker);
+    t.cardEl.remove();
+    if (tracks.length === 0){
+      pause(); virtualMs = 0;
+      el("uploadOverlay").style.display = "flex";
+      updateHeaderSummary();
+    } else {
+      recomputeGlobalRange();
+      updateHeaderSummary();
+      fitAllBounds();
+      updateAll(Math.min(virtualMs, globalDurationMs));
+    }
+  }
+
+  function recomputeGlobalRange(){
+    if (!tracks.length) return;
+    globalStart = new Date(Math.min(...tracks.map(t => t.points[0].time.getTime())));
+    globalEnd = new Date(Math.max(...tracks.map(t => t.points[t.points.length-1].time.getTime())));
+    globalDurationMs = Math.max(1000, globalEnd.getTime() - globalStart.getTime());
+    el("scrubber").max = globalDurationMs;
+    el("scrubber").step = Math.max(1, Math.floor(globalDurationMs/3000));
+    el("scrubStart").textContent = fmtClock(0);
+    el("scrubEnd").textContent = fmtClock(globalDurationMs);
+  }
+
+  function updateHeaderSummary(){
+    if (!tracks.length){ el("fileMeta").textContent = "ログ未読込"; return; }
+    const totalPts = tracks.reduce((s,t) => s + t.points.length, 0);
+    const totalDist = tracks.reduce((s,t) => s + t.totalDist, 0);
+    const anySynth = tracks.some(t => t.synthesized);
+    el("fileMeta").textContent = `${tracks.length}本のログ ・ 計${totalPts}点 ・ ${fmtDist(totalDist)}${anySynth ? " ・ ⚠ 一部の時刻を自動補正" : ""}`;
+  }
+
+  /* ============ SPARKLINE ============ */
+  function drawSparkline(){
+    const canvas = el("sparkline");
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+    if (!tracks.length) return;
+    const visible = tracks.filter(t=>t.visible);
+    if (!visible.length) return;
+    const maxV = Math.max(0.1, ...visible.flatMap(t => t.speeds));
+    visible.forEach(t => {
+      ctx.beginPath();
+      t.points.forEach((p,i) => {
+        const x = ((p.time.getTime() - globalStart.getTime())/globalDurationMs) * (W-4) + 2;
+        const y = H - 6 - (t.speeds[i]/maxV) * (H-14);
+        i===0 ? ctx.moveTo(x,y) : ctx.lineTo(x,y);
+      });
+      ctx.strokeStyle = t.color; ctx.lineWidth = 1.4; ctx.stroke();
+    });
+    const x = (virtualMs/globalDurationMs) * (W-4) + 2;
+    ctx.beginPath(); ctx.moveTo(x,2); ctx.lineTo(x,H-2);
+    ctx.strokeStyle = "rgba(255,255,255,0.45)"; ctx.lineWidth = 1.3; ctx.stroke();
+  }
+
+  /* ============ PLAYBACK ============ */
+  function indexForAbsTime(track, absTimeMs){
+    const pts = track.points;
+    if (absTimeMs <= pts[0].time.getTime()) return 0;
+    if (absTimeMs >= pts[pts.length-1].time.getTime()) return pts.length-1;
+    // 「絶対時刻以下で最大」の点を探す(=直前の位置で固定する)
+    let lo=0, hi=pts.length-1;
+    while (lo < hi){
+      const mid = (lo+hi+1)>>1;
+      if (pts[mid].time.getTime() <= absTimeMs) lo = mid; else hi = mid-1;
+    }
+    return lo;
+  }
+
+  function updateAll(ms){
+    virtualMs = Math.max(0, Math.min(globalDurationMs, ms));
+    if (!tracks.length){ drawSparkline(); return; }
+    const absTimeMs = globalStart.getTime() + virtualMs;
+    const allVisible = [];   // 表示中の全ログの現在地点 (フォールバック用)
+    const activeOnly = [];   // ステータスが「進行中」のログの現在地点 (①)
+
+    tracks.forEach(track => {
+      const startMs = track.points[0].time.getTime();
+      const endMs = track.points[track.points.length-1].time.getTime();
+      let status = "進行中", idx;
+      if (absTimeMs < startMs){ idx = 0; status = "待機中"; }
+      else if (absTimeMs > endMs){ idx = track.points.length-1; status = "終了"; }
+      else idx = indexForAbsTime(track, absTimeMs);
+      track.currentIdx = idx;
+      const p = track.points[idx];
+
+      if (track.visible){
+        track.marker.setLatLng([p.lat, p.lon]);
+        const showTrail = absTimeMs >= startMs;
+        track.trailLine.setLatLngs(showTrail ? track.points.slice(0, idx+1).map(pt => [pt.lat, pt.lon]) : []);
+        const entry = { id: track.id, lat: p.lat, lon: p.lon };
+        allVisible.push(entry);
+        if (status === "進行中") activeOnly.push(entry);
+      }
+      updateTrackCard(track, p, status);
+    });
+
+    // ① 進行中のログがあればそれだけを追従対象にする。
+    //    どのログも進行中でない(全ログの合間など)場合は表示中の全ログにフォールバック。
+    const followSet = activeOnly.length ? activeOnly : allVisible;
+    applyFollowCamera(followSet);
+
+    el("rTime").textContent = fmtDateTime(new Date(absTimeMs));
+    el("rElapsed").textContent = `経過 ${fmtClock(virtualMs)} / ${fmtClock(globalDurationMs)}`;
+    const visibleTracks = tracks.filter(t=>t.visible);
+    const totalDistNow = visibleTracks.reduce((s,t) => s + (t.cum[t.currentIdx]||0), 0);
+    el("rTotalDist").textContent = fmtDist(totalDistNow);
+    el("rTrackCount").textContent = `${visibleTracks.length} / ${tracks.length}`;
+
+    el("scrubber").value = virtualMs;
+    drawSparkline();
+  }
+
+  function step(ts){
+    if (!playing) return;
+    if (lastFrameTs === null) lastFrameTs = ts;
+    const dt = ts - lastFrameTs;
+    lastFrameTs = ts;
+    const next = virtualMs + dt * speedMult;
+    if (next >= globalDurationMs){
+      updateAll(globalDurationMs);
+      pause();
+      return;
+    }
+    updateAll(next);
+    rafId = requestAnimationFrame(step);
+  }
+
+  function play(){
+    if (playing || !tracks.length) return;
+    if (virtualMs >= globalDurationMs) virtualMs = 0;
+    playing = true; lastFrameTs = null;
+    el("playIcon").innerHTML = '<path d="M6 5h4v14H6zM14 5h4v14h-4z"/>';
+    rafId = requestAnimationFrame(step);
+  }
+  function pause(){
+    playing = false;
+    if (rafId) cancelAnimationFrame(rafId);
+    el("playIcon").innerHTML = '<path d="M8 5v14l11-7z"/>';
+  }
+  function togglePlay(){ playing ? pause() : play(); }
+  function seekTo(ms){ pause(); updateAll(ms); }
+
+  /* ============ LOADING ============ */
+  function addTrackFromCSVText(text, label){
+    try {
+      const raw = parseCSV(text);
+      const synthesized = raw.timestampsWereSynthesized;
+      const metrics = buildTrackMetrics(raw);
+      const wasEmpty = tracks.length === 0;
+
+      const track = {
+        id: trackIdSeq++, label, color: TRACK_COLORS[colorCursor++ % TRACK_COLORS.length],
+        points: metrics.points, cum: metrics.cum, speeds: metrics.speeds,
+        totalDist: metrics.totalDist, durationMs: metrics.durationMs,
+        visible: true, currentIdx: 0, synthesized
+      };
+      const latlngs = track.points.map(p => [p.lat, p.lon]);
+      track.fullLine = L.polyline(latlngs, { color: track.color, weight:2, opacity:0.32, dashArray:"1,6" });
+      track.trailLine = L.polyline([], { color: track.color, weight:3.5, opacity:0.95 });
+      const iconHtml = `<div class="gps-marker"><div class="ring" style="border-color:${track.color}"></div><div class="dot" style="background:${track.color};box-shadow:0 0 12px 2px ${track.color}99;"></div></div>`;
+      track.marker = L.marker(latlngs[0], { icon: L.divIcon({ html: iconHtml, className:"", iconSize:[18,18], iconAnchor:[9,9] }) });
+
+      if (el("fullTrackToggle").checked) track.fullLine.addTo(map);
+      track.trailLine.addTo(map);
+      track.marker.addTo(map);
+
+      tracks.push(track);
+      createTrackCardElement(track);
+      recomputeGlobalRange();
+      updateHeaderSummary();
+      el("uploadOverlay").style.display = "none";
+      el("uploadError").style.display = "none";
+      if (wasEmpty) { virtualMs = 0; pause(); }
+      fitAllBounds();
+      updateAll(virtualMs);
+    } catch (e){
+      showError(`「${label}」の読み込みエラー: ${e.message}`);
+    }
+  }
+
+  function showError(msg){
+    if (el("uploadOverlay").style.display !== "none"){
+      el("uploadError").textContent = msg;
+      el("uploadError").style.display = "block";
+    } else {
+      el("globalError").textContent = msg;
+      el("globalError").style.display = "block";
+      clearTimeout(window._errTimer);
+      window._errTimer = setTimeout(() => { el("globalError").style.display = "none"; }, 7000);
+    }
+  }
+
+  function handleFiles(fileList){
+    Array.from(fileList).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = ev => addTrackFromCSVText(ev.target.result, file.name);
+      reader.onerror = () => showError(`「${file.name}」の読み込みに失敗しました。`);
+      reader.readAsText(file);
+    });
+  }
+
+  function clearAllTracks(){
+    pause();
+    tracks.forEach(t => { map.removeLayer(t.fullLine); map.removeLayer(t.trailLine); map.removeLayer(t.marker); });
+    tracks = [];
+    el("trackList").innerHTML = "";
+    virtualMs = 0;
+    el("uploadOverlay").style.display = "flex";
+    el("uploadError").style.display = "none";
+    updateHeaderSummary();
+    el("rTime").textContent = "—"; el("rElapsed").textContent = "経過 —";
+    el("rTotalDist").textContent = "—"; el("rTrackCount").textContent = "0 / 0";
+    drawSparkline();
+  }
+
+  /* ============ EVENTS ============ */
+  function wireEvents(){
+    const dropzone = el("dropzone");
+    dropzone.addEventListener("click", () => el("fileInput").click());
+    dropzone.addEventListener("dragover", e => { e.preventDefault(); dropzone.classList.add("dragover"); });
+    dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+    dropzone.addEventListener("drop", e => {
+      e.preventDefault(); dropzone.classList.remove("dragover");
+      if (e.dataTransfer.files.length) handleFiles(e.dataTransfer.files);
+    });
+    el("fileInput").addEventListener("change", e => {
+      if (e.target.files.length) handleFiles(e.target.files);
+      e.target.value = "";
+    });
+    el("sampleBtn").addEventListener("click", () => addTrackFromCSVText(generateSampleCSV(), `サンプル ${tracks.length+1}`));
+
+    el("addLogBtn").addEventListener("click", () => el("fileInput").click());
+    el("fitBtn").addEventListener("click", fitAllBounds);
+    el("clearAllBtn").addEventListener("click", clearAllTracks);
+
+    el("playBtn").addEventListener("click", togglePlay);
+    el("restartBtn").addEventListener("click", () => seekTo(0));
+    el("endBtn").addEventListener("click", () => seekTo(globalDurationMs));
+    el("speedSelect").addEventListener("change", e => { speedMult = parseFloat(e.target.value); });
+    el("scrubber").addEventListener("input", e => seekTo(parseInt(e.target.value,10)));
+
+    el("fullTrackToggle").addEventListener("change", () => {
+      tracks.forEach(t => {
+        if (!t.visible) return;
+        if (el("fullTrackToggle").checked) t.fullLine.addTo(map); else map.removeLayer(t.fullLine);
+      });
+    });
+
+    el("followToggle").addEventListener("change", () => {
+      syncFollowUI();
+      if (el("followToggle").checked){ lastFollowKey = null; updateAll(virtualMs); }
+      else { lastFollowKey = null; }
+    });
+    el("recenterBtn").addEventListener("click", () => {
+      el("followToggle").checked = true;
+      lastFollowKey = null;
+      syncFollowUI();
+      updateAll(virtualMs);
+    });
+  }
+
+  /* ============ INIT ============ */
+  initMap();
+  wireEvents();
+  syncFollowUI();
+  updateAll(0);
+})();
+</script>
+</body>
+</html>
